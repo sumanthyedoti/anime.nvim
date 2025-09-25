@@ -1,4 +1,5 @@
 local M = {}
+local utils = require("anime.utils")
 
 -- State management
 local state = {
@@ -100,10 +101,11 @@ function M.play_code(opts)
 	if word_mode then
 		-- Split by words while preserving spaces and newlines
 		for line_num, line in ipairs(state.recorded_lines) do
-			-- Add words from this line
-			for word in line:gmatch("%S+") do
-				table.insert(chunks, word)
+			local words_and_chars = utils.break_words_and_chars(line)
+			for _, chunk in ipairs(words_and_chars) do
+				table.insert(chunks, chunk)
 			end
+			print(table.concat(chunks, "|"))
 			-- Add newline after each line except the last
 			if line_num < #state.recorded_lines then
 				table.insert(chunks, "\n")
@@ -133,13 +135,7 @@ function M.play_code(opts)
 			current_line = current_line + 1
 			current_col = 1
 		else
-			-- Add chunk to current line
-			if word_mode and lines_to_write[current_line] ~= "" then
-				-- Add space before word (except at line start)
-				lines_to_write[current_line] = lines_to_write[current_line] .. " " .. chunk
-			else
-				lines_to_write[current_line] = lines_to_write[current_line] .. chunk
-			end
+			lines_to_write[current_line] = lines_to_write[current_line] .. chunk
 		end
 
 		-- Update buffer
@@ -182,7 +178,7 @@ vim.api.nvim_create_user_command("AnimePlay", function()
 end, { desc = "Play back recorded code with animation" })
 
 vim.api.nvim_create_user_command("AnimePlayWords", function()
-	M.play_code({ delay = 150, word_mode = true })
+	M.play_code({ delay = 100, word_mode = true })
 end, { desc = "Play back recorded code word by word" })
 
 vim.api.nvim_create_user_command("AnimeStop", function()
