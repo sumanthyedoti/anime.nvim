@@ -15,17 +15,13 @@ local function t(str)
 	return vim.api.nvim_replace_termcodes(str, true, false, true)
 end
 
--- Function to record code from visual selection
 function M.record_code()
 	local mode = vim.fn.mode()
 
-	-- Check if we're in visual mode
-	if mode:match("^[vV]") then
-		-- Exit visual mode first to update marks
-		vim.cmd("normal! ")
+	if mode:match("^[vV]") then -- Check if we're in visual mode
+		vim.cmd("normal! ") -- Exit visual mode first to update marks
 	end
 
-	-- Get the visual selection
 	local lines = vim_utils.get_visual_selection()
 
 	if #lines > 0 then
@@ -35,14 +31,12 @@ function M.record_code()
 
 		print(string.format("Recorded %d line(s) of code", #lines))
 
-		-- Optionally show what was recorded
 		vim.notify("Code recorded successfully!\nUse :PlayCode to animate playback", vim.log.levels.INFO)
 	else
 		vim.notify("No text selected", vim.log.levels.WARN)
 	end
 end
 
--- Function to play back recorded code with animation
 function M.play_code(opts)
 	opts = opts or {}
 	local delay = opts.delay or 50 -- milliseconds between characters
@@ -53,20 +47,13 @@ function M.play_code(opts)
 		return
 	end
 
-	-- Create a new buffer for playback
-	-- state.buffer = vim.api.nvim_create_buf(false, true)
 	state.buffer = vim.api.nvim_get_current_buf()
-
-	-- vim.cmd("split") -- Open buffer in a new window (split)
 	state.window = vim.api.nvim_get_current_win()
 	vim.api.nvim_win_set_buf(state.window, state.buffer)
 
-	-- Start animation
 	state.is_playing = true
 
-	-- Prepare text chunks (words or characters)
 	local chunks = {}
-	-- Split into individual characters
 	for char in state.recorded_text:gmatch(".") do
 		table.insert(chunks, char)
 	end
@@ -91,21 +78,17 @@ function M.play_code(opts)
 
 		chunk_index = chunk_index + 1
 
-		-- Schedule next chunk
 		vim.defer_fn(animate, delay)
 	end
 
-	-- Start animation
 	animate()
 end
 
--- Function to stop playback
 function M.stop_playback()
 	state.is_playing = false
 	vim.notify("Playback stopped", vim.log.levels.INFO)
 end
 
--- Function to clear recorded code
 function M.clear_recording()
 	state.recorded_text = nil
 	state.recorded_lines = {}
@@ -113,13 +96,12 @@ function M.clear_recording()
 	vim.notify("Recording cleared", vim.log.levels.INFO)
 end
 
--- Create commands immediately when the module is loaded
 vim.api.nvim_create_user_command("AnimeRecord", function()
 	M.record_code()
 end, { range = true, desc = "Record selected code for animation" })
 
 vim.api.nvim_create_user_command("AnimePlay", function()
-	M.play_code({ delay = 500, word_mode = false })
+	M.play_code({ delay = 50, word_mode = false })
 end, { desc = "Play back recorded code with animation" })
 
 vim.api.nvim_create_user_command("AnimePlayWords", function()
@@ -134,5 +116,4 @@ vim.api.nvim_create_user_command("AnimeClearRecording", function()
 	M.clear_recording()
 end, { desc = "Clear recorded code" })
 
--- Return the module
 return M

@@ -1,3 +1,4 @@
+local utils = require("anime.utils")
 local M = {}
 
 function M.get_visual_selection()
@@ -10,7 +11,7 @@ function M.get_visual_selection()
 	local end_col = end_pos[3]
 
 	local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
-	lines = M.trim_lines(lines)
+	lines = utils.trim_lines(lines)
 
 	-- Handle single line selection
 	if #lines == 1 then
