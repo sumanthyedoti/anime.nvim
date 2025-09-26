@@ -39,4 +39,11 @@ function M.break_words_and_chars(text)
 	return results
 end
 
+function M.trim_lines(lines)
+	for i, line in ipairs(lines) do
+		lines[i] = line:match("^%s*(.-)%s*$") or ""
+	end
+	return lines
+end
+
 return M

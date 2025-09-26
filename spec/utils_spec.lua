@@ -32,3 +32,18 @@ describe("utils", function()
 		eq(words_and_chars, { "function", "(", ")   ", "~", "/", "project", "/", "nvim" })
 	end)
 end)
+
+describe("trim_lines", function()
+	it("should trim leading and trailing spaces from each line", function()
+		local lines = {
+			"   line one   ",
+			"line two    ",
+			"   line three",
+			"line four",
+			"     ",
+			"",
+		}
+		local trimmed = utils.trim_lines(lines)
+		eq(trimmed, { "line one", "line two", "line three", "line four", "", "" })
+	end)
+end)

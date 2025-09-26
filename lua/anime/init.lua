@@ -1,5 +1,5 @@
 local M = {}
-local utils = require("anime.utils")
+local vim_utils = require("anime.vim_utils")
 
 -- State management
 local state = {
@@ -11,36 +11,8 @@ local state = {
 	is_playing = false,
 }
 
--- Helper function to get visual selection
-local function get_visual_selection()
-	-- Get the visual selection marks
-	local start_pos = vim.fn.getpos("'<")
-	local end_pos = vim.fn.getpos("'>")
-
-	local start_line = start_pos[2]
-	local start_col = start_pos[3]
-	local end_line = end_pos[2]
-	local end_col = end_pos[3]
-
-	-- Get the selected lines
-	local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
-
-	-- Handle single line selection
-	if #lines == 1 then
-		lines[1] = string.sub(lines[1], start_col, end_col)
-	else
-		-- Handle multi-line selection
-		if #lines > 0 then
-			-- Trim first line from start_col
-			lines[1] = string.sub(lines[1], start_col)
-			-- Trim last line up to end_col
-			if #lines > 1 then
-				lines[#lines] = string.sub(lines[#lines], 1, end_col)
-			end
-		end
-	end
-
-	return lines
+local function t(str)
+	return vim.api.nvim_replace_termcodes(str, true, false, true)
 end
 
 -- Function to record code from visual selection
@@ -54,7 +26,7 @@ function M.record_code()
 	end
 
 	-- Get the visual selection
-	local lines = get_visual_selection()
+	local lines = vim_utils.get_visual_selection()
 
 	if #lines > 0 then
 		state.recorded_lines = lines
@@ -92,34 +64,16 @@ function M.play_code(opts)
 	-- Start animation
 	state.is_playing = true
 
-	local lines_to_write = { "" }
-	local current_line = 1
-	local current_col = 1
-
 	-- Prepare text chunks (words or characters)
 	local chunks = {}
-	if word_mode then
-		-- Split by words while preserving spaces and newlines
-		for line_num, line in ipairs(state.recorded_lines) do
-			local words_and_chars = utils.break_words_and_chars(line)
-			for _, chunk in ipairs(words_and_chars) do
-				table.insert(chunks, chunk)
-			end
-			print(table.concat(chunks, "|"))
-			-- Add newline after each line except the last
-			if line_num < #state.recorded_lines then
-				table.insert(chunks, "\n")
-			end
-		end
-	else
-		-- Split into individual characters
-		for char in state.recorded_text:gmatch(".") do
-			table.insert(chunks, char)
-		end
+	-- Split into individual characters
+	for char in state.recorded_text:gmatch(".") do
+		table.insert(chunks, char)
 	end
 
 	local chunk_index = 1
 
+	vim.api.nvim_feedkeys(t("a"), "m", true)
 	local function animate()
 		if chunk_index > #chunks or not state.is_playing then
 			vim.notify("Playback complete!", vim.log.levels.INFO)
@@ -128,21 +82,12 @@ function M.play_code(opts)
 		end
 
 		local chunk = chunks[chunk_index]
-
+		vim.bo[state.buffer].autoindent = false
 		if chunk == "\n" then
-			-- Handle newline
-			table.insert(lines_to_write, "")
-			current_line = current_line + 1
-			current_col = 1
+			vim.api.nvim_feedkeys(t("<CR>"), "m", true)
 		else
-			lines_to_write[current_line] = lines_to_write[current_line] .. chunk
+			vim.api.nvim_feedkeys(t(chunk), "m", true)
 		end
-
-		-- Update buffer
-		vim.api.nvim_buf_set_lines(state.buffer, 0, -1, false, lines_to_write)
-
-		-- Move cursor to end of text for visual feedback
-		vim.api.nvim_win_set_cursor(state.window, { current_line, string.len(lines_to_write[current_line]) })
 
 		chunk_index = chunk_index + 1
 
@@ -174,11 +119,11 @@ vim.api.nvim_create_user_command("AnimeRecord", function()
 end, { range = true, desc = "Record selected code for animation" })
 
 vim.api.nvim_create_user_command("AnimePlay", function()
-	M.play_code({ delay = 50, word_mode = false })
+	M.play_code({ delay = 500, word_mode = false })
 end, { desc = "Play back recorded code with animation" })
 
 vim.api.nvim_create_user_command("AnimePlayWords", function()
-	M.play_code({ delay = 100, word_mode = true })
+	M.play_code({ delay = 500, word_mode = true })
 end, { desc = "Play back recorded code word by word" })
 
 vim.api.nvim_create_user_command("AnimeStop", function()
