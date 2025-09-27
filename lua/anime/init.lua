@@ -38,22 +38,24 @@ function M.record_code()
 	end
 end
 
+local autoindent = vim.o.autoindent
+
 local function before_play()
 	state.is_playing = true
-	-- Disable auto-completion suggestions
-	local cmp = require("cmp")
+	local cmp = require("cmp") -- Disable auto-completion suggestions
 	if cmp then
 		cmp.setup.buffer({ enabled = false })
 	end
-
-	---- Enter insert mode
-	vim.api.nvim_feedkeys(t("a"), "m", true)
+	vim.api.nvim_feedkeys("a", "n", true)
+	vim.o.autoindent = false
 end
 
 local function after_play()
 	state.is_playing = false
 	-- Exit insert mode
-	vim.api.nvim_feedkeys(t("<ESC>"), "m", true)
+	vim.api.nvim_feedkeys(t("<ESC>"), "n", true)
+	vim.cmd("stopinsert")
+	vim.o.autoindent = autoindent
 end
 
 function M.play_code(opts)
@@ -65,8 +67,6 @@ function M.play_code(opts)
 		return
 	end
 
-	before_play()
-
 	local characters = {}
 	print("state.recorded_text", state.recorded_text)
 	for char in state.recorded_text:gmatch(".") do
@@ -74,6 +74,8 @@ function M.play_code(opts)
 	end
 
 	local char_index = 1
+
+	before_play()
 
 	local function animate()
 		if char_index > #characters or not state.is_playing then
@@ -84,7 +86,7 @@ function M.play_code(opts)
 		end
 
 		local char = characters[char_index]
-		print("char", char == CONSTANTS.newline_char and "NL" or char)
+		print("char", char)
 		if char == CONSTANTS.newline_char then
 			print("newline")
 			vim.api.nvim_feedkeys(t("<CR>"), "m", true)
@@ -94,6 +96,7 @@ function M.play_code(opts)
 
 		char_index = char_index + 1
 
+		-- vim.api.nvim_feedkeys(t("<ESC>"), "m", true)
 		vim.defer_fn(animate, delay)
 	end
 
@@ -117,7 +120,7 @@ vim.api.nvim_create_user_command("AnimeRecord", function()
 end, { range = true, desc = "Record selected code for animation" })
 
 vim.api.nvim_create_user_command("AnimePlay", function()
-	M.play_code({ delay = 50, word_mode = false })
+	M.play_code({ delay = 200, word_mode = false })
 end, { desc = "Play back recorded code with animation" })
 
 vim.api.nvim_create_user_command("AnimePlayWords", function()
