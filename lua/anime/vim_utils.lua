@@ -37,4 +37,11 @@ function M.char_at_cursor()
 	return line:sub(col + 1, col + 1)
 end
 
+OPTS = { noremap = true, silent = true }
+M.map_key = function(mode, key, action, extra_opts)
+	local all_opts = (extra_opts and M.merge_tables(OPTS, extra_opts)) or OPTS
+	local keymap = vim.api.nvim_set_keymap
+	keymap(mode, key, action, all_opts)
+end
+
 return M

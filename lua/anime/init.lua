@@ -1,5 +1,6 @@
 local M = {}
 local vim_utils = require("anime.vim_utils")
+local CONSTANTS = require("anime.constants")
 
 -- State management
 local state = {
@@ -26,7 +27,7 @@ function M.record_code()
 
 	if #lines > 0 then
 		state.recorded_lines = lines
-		state.recorded_text = table.concat(lines, "\n")
+		state.recorded_text = table.concat(lines, CONSTANTS.newline_char)
 		state.is_recording = false
 
 		print(string.format("Recorded %d line(s) of code", #lines))
@@ -37,46 +38,61 @@ function M.record_code()
 	end
 end
 
+local function before_play()
+	state.is_playing = true
+	-- Disable auto-completion suggestions
+	local cmp = require("cmp")
+	if cmp then
+		cmp.setup.buffer({ enabled = false })
+	end
+
+	---- Enter insert mode
+	vim.api.nvim_feedkeys(t("a"), "m", true)
+end
+
+local function after_play()
+	state.is_playing = false
+	-- Exit insert mode
+	vim.api.nvim_feedkeys(t("<ESC>"), "m", true)
+end
+
 function M.play_code(opts)
 	opts = opts or {}
 	local delay = opts.delay or 50 -- milliseconds between characters
-	local word_mode = opts.word_mode or false -- if true, animate word by word
 
 	if not state.recorded_text then
 		vim.notify("No code recorded. Use :RecordCode with visual selection first", vim.log.levels.WARN)
 		return
 	end
 
-	state.buffer = vim.api.nvim_get_current_buf()
-	state.window = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(state.window, state.buffer)
+	before_play()
 
-	state.is_playing = true
-
-	local chunks = {}
+	local characters = {}
+	print("state.recorded_text", state.recorded_text)
 	for char in state.recorded_text:gmatch(".") do
-		table.insert(chunks, char)
+		table.insert(characters, char)
 	end
 
-	local chunk_index = 1
+	local char_index = 1
 
-	vim.api.nvim_feedkeys(t("a"), "m", true)
 	local function animate()
-		if chunk_index > #chunks or not state.is_playing then
+		if char_index > #characters or not state.is_playing then
 			vim.notify("Playback complete!", vim.log.levels.INFO)
 			state.is_playing = false
+			after_play()
 			return
 		end
 
-		local chunk = chunks[chunk_index]
-		vim.bo[state.buffer].autoindent = false
-		if chunk == "\n" then
+		local char = characters[char_index]
+		print("char", char == CONSTANTS.newline_char and "NL" or char)
+		if char == CONSTANTS.newline_char then
+			print("newline")
 			vim.api.nvim_feedkeys(t("<CR>"), "m", true)
 		else
-			vim.api.nvim_feedkeys(t(chunk), "m", true)
+			vim.api.nvim_feedkeys(t(char), "m", true)
 		end
 
-		chunk_index = chunk_index + 1
+		char_index = char_index + 1
 
 		vim.defer_fn(animate, delay)
 	end
