@@ -42,6 +42,11 @@ local autoindent = vim.o.autoindent
 
 local function before_play()
 	state.is_playing = true
+
+	state.buffer = vim.api.nvim_get_current_buf()
+	state.window = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(state.window, state.buffer)
+
 	local cmp = require("cmp") -- Disable auto-completion suggestions
 	if cmp then
 		cmp.setup.buffer({ enabled = false })
@@ -68,7 +73,6 @@ function M.play_code(opts)
 	end
 
 	local characters = {}
-	print("state.recorded_text", state.recorded_text)
 	for char in state.recorded_text:gmatch(".") do
 		table.insert(characters, char)
 	end
@@ -76,6 +80,16 @@ function M.play_code(opts)
 	local char_index = 1
 
 	before_play()
+
+	local function set_2nd_char_with__nvim_set_lines__hack(char)
+		if char == "\n" then -- Don't do anything if 2nd char is newline character
+			return
+		end
+		vim.api.nvim_feedkeys(t("<ESC>"), "n", true)
+		vim.api.nvim_buf_set_lines(state.buffer, 0, -1, false, { characters[char_index - 1] .. char })
+		vim.api.nvim_win_set_cursor(state.window, { 1, 2 })
+		vim.api.nvim_feedkeys("a", "n", true)
+	end
 
 	local function animate()
 		if char_index > #characters or not state.is_playing then
@@ -86,12 +100,15 @@ function M.play_code(opts)
 		end
 
 		local char = characters[char_index]
-		print("char", char)
-		if char == CONSTANTS.newline_char then
-			print("newline")
+		---- HACK: For 2nd character, a newline is getting inserted weirdly, to avoid that
+		if char_index == 2 then
+			set_2nd_char_with__nvim_set_lines__hack(char)
+		----
+		elseif char == CONSTANTS.newline_char then
+			-- if char == CONSTANTS.newline_char then
 			vim.api.nvim_feedkeys(t("<CR>"), "m", true)
 		else
-			vim.api.nvim_feedkeys(t(char), "m", true)
+			vim.api.nvim_feedkeys(char, "m", true)
 		end
 
 		char_index = char_index + 1
@@ -120,7 +137,7 @@ vim.api.nvim_create_user_command("AnimeRecord", function()
 end, { range = true, desc = "Record selected code for animation" })
 
 vim.api.nvim_create_user_command("AnimePlay", function()
-	M.play_code({ delay = 200, word_mode = false })
+	M.play_code({ delay = 100, word_mode = false })
 end, { desc = "Play back recorded code with animation" })
 
 vim.api.nvim_create_user_command("AnimePlayWords", function()
