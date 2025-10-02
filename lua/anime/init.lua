@@ -1,155 +1,174 @@
 local M = {}
-local vim_utils = require("anime.vim_utils")
-local CONSTANTS = require("anime.constants")
+
+-- Default configuration
+local config = {
+	playback_delay = 50, -- milliseconds between snapshots
+}
 
 -- State management
 local state = {
-	recorded_text = nil,
-	recorded_lines = {},
-	buffer = nil,
-	window = nil,
+	snapshots = {},
 	is_recording = false,
 	is_playing = false,
+	recording_buffer = nil,
+	playback_buffer = nil,
+	playback_window = nil,
 }
 
-local function t(str)
-	return vim.api.nvim_replace_termcodes(str, true, false, true)
+-- Setup function
+function M.setup(opts)
+	config = vim.tbl_deep_extend("force", config, opts or {})
 end
 
-function M.record_code()
-	local mode = vim.fn.mode()
-
-	if mode:match("^[vV]") then -- Check if we're in visual mode
-		vim.cmd("normal! ") -- Exit visual mode first to update marks
+-- Capture current buffer state
+local function capture_snapshot()
+	if not state.is_recording then
+		return
 	end
 
-	local lines = vim_utils.get_visual_selection()
+	local lines = vim.api.nvim_buf_get_lines(state.recording_buffer, 0, -1, false)
+	local ok, cursor = pcall(vim.api.nvim_win_get_cursor, 0)
 
-	if #lines > 0 then
-		state.recorded_lines = lines
-		state.recorded_text = table.concat(lines, CONSTANTS.newline_char)
-		state.is_recording = false
-
-		print(string.format("Recorded %d line(s) of code", #lines))
-
-		vim.notify("Code recorded successfully!\nUse :PlayCode to animate playback", vim.log.levels.INFO)
-	else
-		vim.notify("No text selected", vim.log.levels.WARN)
+	if not ok or not cursor then
+		return
 	end
+
+	table.insert(state.snapshots, {
+		lines = vim.deepcopy(lines),
+		cursor = { cursor[1], cursor[2] },
+	})
 end
 
-local autoindent = vim.o.autoindent
+function M.start_recording()
+	if state.is_recording then
+		vim.notify("Already recording!", vim.log.levels.WARN)
+		return
+	end
+
+	state.snapshots = {}
+	state.recording_buffer = vim.api.nvim_get_current_buf()
+	state.is_recording = true
+
+	capture_snapshot()
+
+	local group = vim.api.nvim_create_augroup("AnimeRecording", { clear = true })
+
+	vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, {
+		group = group,
+		buffer = state.recording_buffer,
+		callback = capture_snapshot,
+	})
+
+	vim.api.nvim_create_autocmd("CursorMovedI", {
+		group = group,
+		buffer = state.recording_buffer,
+		callback = capture_snapshot,
+	})
+
+	vim.notify("Recording started! Use :AnimeStopRecord when done", vim.log.levels.INFO)
+end
+
+function M.stop_recording()
+	if not state.is_recording then
+		vim.notify("Not currently recording", vim.log.levels.WARN)
+		return
+	end
+
+	capture_snapshot()
+	state.is_recording = false
+	vim.api.nvim_del_augroup_by_name("AnimeRecording")
+
+	vim.notify(string.format("Recording stopped! Captured %d snapshots", #state.snapshots), vim.log.levels.INFO)
+end
+
+local cmp = require("cmp") -- Disable auto-completion suggestions
 
 local function before_play()
 	state.is_playing = true
+	state.playback_buffer = vim.api.nvim_get_current_buf()
+	state.playback_window = vim.api.nvim_get_current_win()
 
-	state.buffer = vim.api.nvim_get_current_buf()
-	state.window = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(state.window, state.buffer)
+	vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, {})
 
-	local cmp = require("cmp") -- Disable auto-completion suggestions
 	if cmp then
 		cmp.setup.buffer({ enabled = false })
 	end
-	vim.api.nvim_feedkeys("a", "n", true)
-	vim.o.autoindent = false
 end
 
 local function after_play()
 	state.is_playing = false
-	-- Exit insert mode
-	vim.api.nvim_feedkeys(t("<ESC>"), "n", true)
-	vim.cmd("stopinsert")
-	vim.o.autoindent = autoindent
+	if cmp then
+		cmp.setup.buffer({ enabled = true })
+	end
 end
 
-function M.play_code(opts)
-	opts = opts or {}
-	local delay = opts.delay or 50 -- milliseconds between characters
-
-	if not state.recorded_text then
-		vim.notify("No code recorded. Use :RecordCode with visual selection first", vim.log.levels.WARN)
+function M.play()
+	if #state.snapshots == 0 then
+		vim.notify("No recording found. Use :AnimeStartRecord first", vim.log.levels.WARN)
 		return
 	end
 
-	local characters = {}
-	for char in state.recorded_text:gmatch(".") do
-		table.insert(characters, char)
-	end
-
-	local char_index = 1
+	local snapshot_index = 1
 
 	before_play()
-
-	local function set_2nd_char_with__nvim_set_lines__hack(char)
-		if char == "\n" then -- Don't do anything if 2nd char is newline character
-			return
-		end
-		vim.api.nvim_feedkeys(t("<ESC>"), "n", true)
-		vim.api.nvim_buf_set_lines(state.buffer, 0, -1, false, { characters[char_index - 1] .. char })
-		vim.api.nvim_win_set_cursor(state.window, { 1, 2 })
-		vim.api.nvim_feedkeys("a", "n", true)
-	end
-
 	local function animate()
-		if char_index > #characters or not state.is_playing then
-			vim.notify("Playback complete!", vim.log.levels.INFO)
-			state.is_playing = false
+		if snapshot_index > #state.snapshots or not state.is_playing then
 			after_play()
+			vim.notify("Playback complete!", vim.log.levels.INFO)
 			return
 		end
 
-		local char = characters[char_index]
-		---- HACK: For 2nd character, a newline is getting inserted weirdly, to avoid that
-		if char_index == 2 then
-			set_2nd_char_with__nvim_set_lines__hack(char)
-		----
-		elseif char == CONSTANTS.newline_char then
-			-- if char == CONSTANTS.newline_char then
-			vim.api.nvim_feedkeys(t("<CR>"), "m", true)
-		else
-			vim.api.nvim_feedkeys(char, "m", true)
-		end
+		local snapshot = state.snapshots[snapshot_index]
 
-		char_index = char_index + 1
+		vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, snapshot.lines)
 
-		-- vim.api.nvim_feedkeys(t("<ESC>"), "m", true)
-		vim.defer_fn(animate, delay)
+		local line_count = vim.api.nvim_buf_line_count(state.playback_buffer)
+		local cursor_line = math.min(snapshot.cursor[1], line_count)
+		local line = vim.api.nvim_buf_get_lines(state.playback_buffer, cursor_line - 1, cursor_line, false)[1]
+		local cursor_col = math.min(snapshot.cursor[2], #line)
+
+		pcall(vim.api.nvim_win_set_cursor, state.playback_window, { cursor_line, cursor_col })
+
+		snapshot_index = snapshot_index + 1
+
+		vim.defer_fn(animate, config.playback_delay)
 	end
 
 	animate()
 end
 
-function M.stop_playback()
+function M.stop()
 	state.is_playing = false
 	vim.notify("Playback stopped", vim.log.levels.INFO)
 end
 
-function M.clear_recording()
-	state.recorded_text = nil
-	state.recorded_lines = {}
-	state.is_recording = false
+function M.clear()
+	if state.is_recording then
+		M.stop_recording()
+	end
+	state.snapshots = {}
 	vim.notify("Recording cleared", vim.log.levels.INFO)
 end
 
-vim.api.nvim_create_user_command("AnimeRecord", function()
-	M.record_code()
-end, { range = true, desc = "Record selected code for animation" })
+-- Create commands
+vim.api.nvim_create_user_command("AnimeRecordStart", M.start_recording, {
+	desc = "Start recording buffer changes",
+})
 
-vim.api.nvim_create_user_command("AnimePlay", function()
-	M.play_code({ delay = 100, word_mode = false })
-end, { desc = "Play back recorded code with animation" })
+vim.api.nvim_create_user_command("AnimeRecordStop", M.stop_recording, {
+	desc = "Stop recording buffer changes",
+})
 
-vim.api.nvim_create_user_command("AnimePlayWords", function()
-	M.play_code({ delay = 500, word_mode = true })
-end, { desc = "Play back recorded code word by word" })
+vim.api.nvim_create_user_command("AnimeRecordClear", M.clear, {
+	desc = "Clear current recording",
+})
 
-vim.api.nvim_create_user_command("AnimeStop", function()
-	M.stop_playback()
-end, { desc = "Stop code playback animation" })
+vim.api.nvim_create_user_command("AnimePlay", M.play, {
+	desc = "Play back recorded changes",
+})
 
-vim.api.nvim_create_user_command("AnimeClearRecording", function()
-	M.clear_recording()
-end, { desc = "Clear recorded code" })
+vim.api.nvim_create_user_command("AnimePlayStop", M.stop, {
+	desc = "Stop playback",
+})
 
 return M
