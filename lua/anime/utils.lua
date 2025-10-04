@@ -46,4 +46,42 @@ function M.trim_lines(lines)
 	return lines
 end
 
+function M.index_of(array, value)
+	for i, v in ipairs(array) do
+		if v == value then
+			return i
+		end
+	end
+	return nil
+end
+
+function M.smaller_value(array, value)
+	if value < array[1] then
+		return nil
+	end
+	for i, v in ipairs(array) do
+		if v == value and i == 1 then -- return the first/last if bouding elements are are equal to value
+			return v
+		elseif v >= value then
+			return array[i - 1]
+		end
+	end
+	return nil
+end
+
+function M.bigger_value(array, value)
+	if value < array[1] then
+		return nil
+	end
+	for i, v in ipairs(array) do
+		if v == value and i == #array then
+			return v
+		elseif i == 1 then
+		elseif v > value then
+			return array[i]
+		end
+	end
+	return nil
+end
+
 return M

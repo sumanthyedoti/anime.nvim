@@ -56,7 +56,6 @@ function M.show_note(text)
 end
 
 M.render_notes_gutter = function(lines)
-	print(vim.inspect(lines))
 	vim.fn.sign_unplace("AnimeNotesGutterGroup")
 	for _, line in ipairs(lines) do
 		vim.fn.sign_define(

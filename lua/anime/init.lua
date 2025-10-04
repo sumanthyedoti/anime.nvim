@@ -1,6 +1,7 @@
 local M = {}
-local notes = require("anime.notes")
+local utils = require("anime.utils")
 local vim_utils = require("anime.vim_utils")
+local notes = require("anime.notes")
 
 local config = {
 	playback_delay = 75, -- milliseconds between frames
@@ -14,10 +15,10 @@ local state = {
 	recording_buffer = nil,
 	playback_buffer = nil,
 	playback_window = nil,
-	annotations = {},
-	annotation_marks = {},
-	popup_win = nil,
-	popup_buf = nil,
+
+	notes = {},
+	notes_line_numbers = {},
+	notes_current_index = nil,
 }
 
 function M.setup(opts)
@@ -102,7 +103,7 @@ end
 local function after_play()
 	state.frame_index = 1
 	state.is_playing = false
-
+	notes.render_notes_gutter(vim.tbl_keys(state.notes))
 	vim.cmd("LspStart") -- Re-enable LSP
 	if cmp then -- Re-enable auto-completion suggestions
 		cmp.setup.buffer({ enabled = true })
@@ -155,9 +156,8 @@ function M.clear_recording()
 end
 
 local function save_annotation(line, text)
-	state.annotations[line] = text
-	local annotated_lines = vim.tbl_keys(state.annotations)
-	print(vim.inspect(annotated_lines), line)
+	state.notes[line] = text
+	local annotated_lines = vim.tbl_keys(state.notes)
 	notes.render_notes_gutter(annotated_lines)
 end
 
@@ -186,17 +186,22 @@ function M.add_annotation()
 		local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 		vim.api.nvim_win_close(win, true)
 		save_annotation(line, table.concat(lines, "\n"))
+
+		local keys = vim.tbl_keys(state.notes)
+		table.sort(keys)
+		print("state.notes", vim.inspect(state.notes), table.concat(keys))
+		state.note_lines = keys
 	end, { buffer = buf })
 end
 
 function M.list_notes()
-	if vim.tbl_isempty(state.annotations) then
+	if vim.tbl_isempty(state.notes) then
 		vim.notify("No annotations found", vim.log.levels.INFO)
 		return
 	end
 
 	local lines = { "Annotations:" }
-	for line_num, text in pairs(state.annotations) do
+	for line_num, text in pairs(state.notes) do
 		table.insert(lines, string.format("  Line %d: %s", line_num, text:sub(1, 50)))
 	end
 
@@ -205,7 +210,7 @@ end
 
 function M.show_annotation()
 	local current_line_num = vim.api.nvim_win_get_cursor(0)[1]
-	local current_line_note = state.annotations[current_line_num]
+	local current_line_note = state.notes[current_line_num]
 
 	if not current_line_note then
 		vim.notify("No annotation on this line", vim.log.levels.WARN)
@@ -217,18 +222,35 @@ end
 
 function M.remove_annotation()
 	local line = vim.api.nvim_win_get_cursor(0)[1]
-	local buf = vim.api.nvim_get_current_buf()
 
-	if state.annotations[line] then
-		state.annotations[line] = nil
-		notes.render_notes_gutter(vim.tbl_keys(state.annotations))
-		vim.notify("Annotation removed from line " .. line, vim.log.levels.INFO)
+	if state.notes[line] then
+		state.notes[line] = nil
+		notes.render_notes_gutter(vim.tbl_keys(state.notes))
+
+		local keys = vim.tbl_keys(state.notes)
+		table.sort(keys)
+		state.note_lines = keys
 	else
 		vim.notify("No annotation on this line", vim.log.levels.WARN)
 	end
 end
 
--- Create commands
+function M.go_to_next_note()
+	local current_line = vim_utils.get_current_line_number()
+	local next_note_line = utils.bigger_value(state.note_lines, current_line)
+	local next_line_note = state.notes[next_note_line]
+	vim.api.nvim_win_set_cursor(0, { next_note_line, 0 })
+	notes.show_note(next_line_note)
+end
+
+function M.go_to_prev_note()
+	local current_line = vim_utils.get_current_line_number()
+	local prev_note_line = utils.smaller_value(state.note_lines, current_line)
+	local prev_note = state.notes[prev_note_line]
+	vim.api.nvim_win_set_cursor(0, { prev_note_line, 0 })
+	notes.show_note(prev_note)
+end
+
 vim.api.nvim_create_user_command("AnimeRecordStart", M.start_recording, {
 	desc = "Start recording buffer changes",
 })
@@ -263,6 +285,14 @@ vim.api.nvim_create_user_command("AnimeNoteRemove", M.remove_annotation, {
 
 vim.api.nvim_create_user_command("AnimeNotesList", M.list_notes, {
 	desc = "List Notes",
+})
+
+vim.api.nvim_create_user_command("AnimeNoteNext", M.go_to_next_note, {
+	desc = "Show next note",
+})
+
+vim.api.nvim_create_user_command("AnimeNotePrev", M.go_to_prev_note, {
+	desc = "Show next note",
 })
 
 return M
