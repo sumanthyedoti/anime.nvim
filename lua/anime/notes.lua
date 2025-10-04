@@ -1,4 +1,5 @@
 local M = {}
+local vim_utils = require("anime.vim_utils")
 
 function M.show_note(text)
 	-- Split annotation text into lines for better display
@@ -13,19 +14,11 @@ function M.show_note(text)
 	-- Calculate popup size
 	local width = 60
 	local height = math.min(#lines + 2, 20) -- Max height of 20 lines
-	-- Get editor dimensions
-	local ui = vim.api.nvim_list_uis()[1]
-	local row = math.floor((ui.height - height) / 2)
-	local col = math.floor((ui.width - width) / 2)
 
 	local opts = {
-		relative = "cursor",
-		row = 1,
-		col = 0,
-		-- width = 40,
-		-- height = 5,
-		-- row = row,
-		-- col = col,
+		relative = "cursor", -- "cursor" | "editor"
+		row = 0,
+		col = 4,
 		width = width,
 		height = height,
 		style = "minimal",
@@ -58,15 +51,38 @@ function M.show_note(text)
 	vim.wo[win].wrap = true
 	vim.wo[win].linebreak = true
 
-	local function close_popup()
+	vim.keymap.set("n", "q", M.close_popup_win__closure(win))
+	vim.keymap.set("n", "<Esc>", M.close_popup_win__closure(win))
+end
+
+M.render_notes_gutter = function(lines)
+	print(vim.inspect(lines))
+	vim.fn.sign_unplace("AnimeNotesGutterGroup")
+	for _, line in ipairs(lines) do
+		vim.fn.sign_define(
+			"AnimeNotesGutter",
+			{ text = "🗈", texthl = "DiagnosticSignInfo", numhl = "DiagnosticSignInfo" }
+		)
+		vim.fn.sign_place(
+			0,
+			"AnimeNotesGutterGroup",
+			"AnimeNotesGutter",
+			vim.api.nvim_get_current_buf(),
+			{ lnum = line }
+		)
+	end
+end
+
+M.clear_notes_gutter = function()
+	vim.fn.sign_unplace("AnimeNotesGutterGroup")
+end
+
+function M.close_popup_win__closure(win)
+	return function()
 		if vim.api.nvim_win_is_valid(win) then
 			vim.api.nvim_win_close(win, true)
 		end
 	end
-	vim.keymap.set("n", "q", close_popup)
-	vim.keymap.set("n", "<Esc>", close_popup)
 end
-
-vim.api.nvim_create_user_command("QuickChat", M.show_note, {})
 
 return M

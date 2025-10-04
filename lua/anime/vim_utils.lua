@@ -44,4 +44,8 @@ M.map_key = function(mode, key, action, extra_opts)
 	keymap(mode, key, action, all_opts)
 end
 
+M.current_line_number = function()
+	return vim.api.nvim_win_get_cursor(0)[1]
+end
+
 return M
