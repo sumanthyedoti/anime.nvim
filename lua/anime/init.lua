@@ -1,18 +1,22 @@
 local M = {}
+local notes = require("anime.notes")
 
--- Default configuration
 local config = {
-	playback_delay = 75, -- milliseconds between snapshots
+	playback_delay = 75, -- milliseconds between frames
 }
 
--- State management
 local state = {
-	snapshots = {},
+	frames = {},
+	frame_index = 1,
 	is_recording = false,
 	is_playing = false,
 	recording_buffer = nil,
 	playback_buffer = nil,
 	playback_window = nil,
+	annotations = {},
+	annotation_marks = {},
+	popup_win = nil,
+	popup_buf = nil,
 }
 
 function M.setup(opts)
@@ -31,7 +35,7 @@ local function capture_frame()
 		return
 	end
 
-	table.insert(state.snapshots, {
+	table.insert(state.frames, {
 		lines = vim.deepcopy(lines),
 		cursor = { cursor[1], cursor[2] },
 	})
@@ -43,7 +47,7 @@ function M.start_recording()
 		return
 	end
 
-	state.snapshots = {}
+	state.frames = {}
 	state.recording_buffer = vim.api.nvim_get_current_buf()
 	state.is_recording = true
 
@@ -149,6 +153,71 @@ function M.clear()
 	vim.notify("Recording cleared", vim.log.levels.INFO)
 end
 
+vim.fn.sign_define("AnimeAnnotation", {
+	text = "💡",
+	texthl = "DiagnosticSignHint",
+	numhl = "DiagnosticSignHint",
+})
+
+function M.add_annotation()
+	local line = vim.api.nvim_win_get_cursor(0)[1]
+	local buf = vim.api.nvim_get_current_buf()
+
+	-- Prompt user for explanation
+	vim.ui.input({ prompt = "Enter explanation: " }, function(input)
+		if input and input ~= "" then
+			state.annotations[line] = input
+
+			-- Place sign in gutter
+			vim.fn.sign_place(0, "AnimeAnnotationGroup", "AnimeAnnotation", buf, {
+				lnum = line,
+				priority = 10,
+			})
+
+			vim.notify("Annotation added to line " .. line, vim.log.levels.INFO)
+		end
+	end)
+end
+
+function M.list_notes()
+	if vim.tbl_isempty(state.annotations) then
+		vim.notify("No annotations found", vim.log.levels.INFO)
+		return
+	end
+
+	local lines = { "Annotations:" }
+	for line_num, text in pairs(state.annotations) do
+		table.insert(lines, string.format("  Line %d: %s", line_num, text:sub(1, 50)))
+	end
+
+	vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
+end
+
+function M.show_annotation()
+	local current_line_num = vim.api.nvim_win_get_cursor(0)[1]
+	local current_line_note = state.annotations[current_line_num]
+
+	if not current_line_note then
+		vim.notify("No annotation on this line", vim.log.levels.WARN)
+		return
+	end
+
+	notes.show_note(current_line_note)
+end
+
+function M.remove_annotation()
+	local line = vim.api.nvim_win_get_cursor(0)[1]
+	local buf = vim.api.nvim_get_current_buf()
+
+	if state.annotations[line] then
+		state.annotations[line] = nil
+		vim.fn.sign_unplace("AnimeAnnotationGroup", { buffer = buf, id = line })
+		vim.notify("Annotation removed from line " .. line, vim.log.levels.INFO)
+	else
+		vim.notify("No annotation on this line", vim.log.levels.WARN)
+	end
+end
+
 -- Create commands
 vim.api.nvim_create_user_command("AnimeRecordStart", M.start_recording, {
 	desc = "Start recording buffer changes",
@@ -168,6 +237,18 @@ vim.api.nvim_create_user_command("AnimePlay", M.play, {
 
 vim.api.nvim_create_user_command("AnimePlayStop", M.stop, {
 	desc = "Stop playback",
+})
+
+vim.api.nvim_create_user_command("AnimeNoteAdd", M.add_annotation, {
+	desc = "Add Node",
+})
+
+vim.api.nvim_create_user_command("AnimeNoteShow", M.show_annotation, {
+	desc = "Show Note",
+})
+
+vim.api.nvim_create_user_command("AnimeNotesList", M.list_notes, {
+	desc = "List Notes",
 })
 
 return M
