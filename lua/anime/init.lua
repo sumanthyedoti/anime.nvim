@@ -93,9 +93,8 @@ local function before_play()
 	state.is_playing = true
 	state.playback_buffer = vim.api.nvim_get_current_buf()
 	state.playback_window = vim.api.nvim_get_current_win()
-
+	notes.clear_notes_gutter_signs()
 	vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, {})
-
 	vim.cmd("LspStop") -- Disable LSP to prevent diagnostics during playback
 	if cmp then -- Disable auto-completion suggestions
 		cmp.setup.buffer({ enabled = false })
@@ -105,7 +104,7 @@ end
 local function after_play()
 	state.frame_index = 1
 	state.is_playing = false
-	notes.render_notes_gutter(vim.tbl_keys(state.notes))
+	notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
 	vim.cmd("LspStart") -- Re-enable LSP
 	if cmp then -- Re-enable auto-completion suggestions
 		cmp.setup.buffer({ enabled = true })
@@ -160,7 +159,7 @@ end
 local function save_note(line, text)
 	state.notes[line] = text
 	local noted_lines = vim.tbl_keys(state.notes)
-	notes.render_notes_gutter(noted_lines)
+	notes.render_notes_gutter_signs(noted_lines)
 end
 
 local function update_note_lines()
@@ -229,7 +228,7 @@ function M.remove_note()
 
 	if state.notes[line] then
 		state.notes[line] = nil
-		notes.render_notes_gutter(vim.tbl_keys(state.notes))
+		notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
 		update_note_lines()
 	else
 		vim.notify("No note on this line", vim.log.levels.WARN)
@@ -266,7 +265,7 @@ function M.go_to_prev_note()
 	state.notes_current_window = notes.show_note(prev_note)
 end
 
-vim.api.nvim_create_user_command("AnimeRecordStart", M.start_recording, {
+vim.api.nvim_create_user_command("AnimeRecord", M.start_recording, {
 	desc = "Start recording buffer changes",
 })
 
