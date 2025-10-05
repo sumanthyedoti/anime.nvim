@@ -93,22 +93,23 @@ local function before_play()
 	state.is_playing = true
 	state.playback_buffer = vim.api.nvim_get_current_buf()
 	state.playback_window = vim.api.nvim_get_current_win()
-	notes.clear_notes_gutter_signs()
 	vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, {})
 	vim.cmd("LspStop") -- Disable LSP to prevent diagnostics during playback
 	if cmp then -- Disable auto-completion suggestions
 		cmp.setup.buffer({ enabled = false })
 	end
+	notes.clear_notes_gutter_signs()
+	keymapping.set_keymaps()
 end
 
 local function after_play()
 	state.frame_index = 1
 	state.is_playing = false
-	notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
 	vim.cmd("LspStart") -- Re-enable LSP
 	if cmp then -- Re-enable auto-completion suggestions
 		cmp.setup.buffer({ enabled = true })
 	end
+	notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
 end
 
 function M.play()
@@ -145,6 +146,7 @@ end
 
 function M.stop()
 	state.is_playing = false
+	keymapping.restore_keymaps()
 	vim.notify("Playback stopped", vim.log.levels.INFO)
 end
 
