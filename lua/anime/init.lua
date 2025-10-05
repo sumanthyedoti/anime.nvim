@@ -5,23 +5,50 @@ local notes = require("anime.notes")
 local keymapping = require("anime.keymapping")
 
 local config = {
-	playback_delay = 75, -- milliseconds between frames
+	playback_delay = 200,
 }
 
 local state = {
 	frames = {},
-	frame_index = 1,
 	is_recording = false,
 	is_playing = false,
 	recording_buffer = nil,
 	playback_buffer = nil,
 	playback_window = nil,
-
-	notes = {},
-	notes_line_numbers = {},
-	notes_current_index = nil,
-	notes_current_window = nil,
+	captions = {},
+	popup_win = nil,
+	popup_buf = nil,
+	last_lines = nil,
+	last_cursor = nil,
 }
+
+local function calculate_delta(old_lines, new_lines, cursor)
+	local old_count = #old_lines
+	local new_count = #new_lines
+	local line_diff = new_count - old_count
+
+	local delta = {
+		line_changes = {},
+		line_count = new_count,
+		line_diff = line_diff,
+		cursor = { cursor[1], cursor[2] },
+	}
+
+	-- Flag if lines were added or removed
+	if line_diff ~= 0 then
+		delta.line_count_changed = true
+	end
+
+	-- Find changed lines
+	local max_lines = math.max(old_count, new_count)
+	for i = 1, max_lines do
+		if old_lines[i] ~= new_lines[i] then
+			delta.line_changes[i] = new_lines[i] or false
+		end
+	end
+
+	return delta
+end
 
 function M.setup(opts)
 	config = vim.tbl_deep_extend("force", config, opts or {})
@@ -39,10 +66,29 @@ local function capture_frame()
 		return
 	end
 
-	table.insert(state.frames, {
-		lines = vim.deepcopy(lines),
-		cursor = { cursor[1], cursor[2] },
-	})
+	-- First frame: store everything
+	if #state.frames == 0 then
+		table.insert(state.frames, {
+			type = "full",
+			lines = vim.deepcopy(lines),
+			cursor = { cursor[1], cursor[2] },
+		})
+		state.last_lines = vim.deepcopy(lines)
+		return
+	end
+
+	-- Calculate and store delta
+	local delta = calculate_delta(state.last_lines, lines, cursor)
+
+	-- Only store if there are actual changes
+	if next(delta.line_changes) ~= nil then
+		table.insert(state.frames, {
+			type = "delta",
+			delta = delta,
+		})
+
+		state.last_lines = vim.deepcopy(lines)
+	end
 end
 
 function M.start_recording()
@@ -52,6 +98,7 @@ function M.start_recording()
 	end
 
 	state.frames = {}
+	state.last_lines = nil
 	state.recording_buffer = vim.api.nvim_get_current_buf()
 	state.is_recording = true
 
@@ -65,13 +112,7 @@ function M.start_recording()
 		callback = capture_frame,
 	})
 
-	vim.api.nvim_create_autocmd("CursorMovedI", {
-		group = group,
-		buffer = state.recording_buffer,
-		callback = capture_frame,
-	})
-
-	vim.notify("Recording started! Use :AnimeStopRecord when done", vim.log.levels.INFO)
+	vim.notify("Recording started! Use :AnimeRecordStop when done", vim.log.levels.INFO)
 end
 
 function M.stop_recording()
@@ -84,12 +125,13 @@ function M.stop_recording()
 	state.is_recording = false
 	vim.api.nvim_del_augroup_by_name("AnimeRecording")
 
-	vim.notify(string.format("Recording stopped! Captured %d frames", #state.frames), vim.log.levels.INFO)
+	vim.notify(string.format("Recording stopped!"), vim.log.levels.INFO)
 end
 
 local cmp = require("cmp")
 
 local function before_play()
+	print(vim.inspect(state.frames))
 	state.is_playing = true
 	state.playback_buffer = vim.api.nvim_get_current_buf()
 	state.playback_window = vim.api.nvim_get_current_win()
@@ -110,34 +152,95 @@ local function after_play()
 		cmp.setup.buffer({ enabled = true })
 	end
 	notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
+	vim.notify("Playback complete!", vim.log.levels.INFO)
+end
+
+local function apply_delta(current_lines, delta)
+	local new_lines = vim.deepcopy(current_lines)
+
+	-- Apply line changes
+	for line_num, content in pairs(delta.line_changes) do
+		if content == false then
+			-- Line was deleted
+			new_lines[line_num] = nil
+		else
+			-- Line was changed or added
+			new_lines[line_num] = content
+		end
+	end
+
+	-- Handle line count changes (compact table to remove nils)
+	if delta.line_count_changed then
+		local compacted = {}
+		for i = 1, delta.line_count do
+			compacted[i] = new_lines[i] or ""
+		end
+		return compacted
+	end
+
+	return new_lines
 end
 
 function M.play()
 	if #state.frames == 0 then
-		vim.notify("No recording found. Use :AnimeStartRecord first", vim.log.levels.WARN)
+		vim.notify("No recording found. Use :AnimeRecordStart first", vim.log.levels.WARN)
 		return
 	end
 
 	before_play()
+
+	local frame_index = 1
+	local current_buffer_state = {}
+
 	local function animate()
-		if state.frame_index > #state.frames or not state.is_playing then
+		if frame_index > #state.frames or not state.is_playing then
 			after_play()
-			vim.notify("Playback complete!", vim.log.levels.INFO)
 			return
 		end
-		local frame = state.frames[state.frame_index]
 
-		vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, frame.lines)
+		local frame = state.frames[frame_index]
+		local cursor_pos = nil
 
-		local line_count = vim.api.nvim_buf_line_count(state.playback_buffer)
-		local cursor_line = math.min(frame.cursor[1], line_count)
-		local line = vim.api.nvim_buf_get_lines(state.playback_buffer, cursor_line - 1, cursor_line, false)[1]
-		local cursor_col = math.min(frame.cursor[2], #line)
+		if frame.type == "full" then -- Full frame: set entire buffer
+			current_buffer_state = vim.deepcopy(frame.lines)
+			vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, current_buffer_state)
+			cursor_pos = frame.cursor
+		elseif frame.type == "delta" then
+			local delta = frame.delta -- Delta frame: apply changes
 
-		pcall(vim.api.nvim_win_set_cursor, state.playback_window, { cursor_line, cursor_col })
+			current_buffer_state = apply_delta(current_buffer_state, delta)
 
-		state.frame_index = state.frame_index + 1
+			-- Check if it's a multi line change
+			local current_line_count = vim.api.nvim_buf_line_count(state.playback_buffer)
+			local target_line_count = delta.line_count
 
+			-- Multi line change -- replace entire buffer
+			if math.abs(current_line_count - target_line_count) > 1 or delta.line_count_changed then
+				vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, current_buffer_state)
+			else -- Minor changes - update only changed lines
+				for line_num, content in pairs(delta.line_changes) do
+					if content == false then
+						if line_num <= vim.api.nvim_buf_line_count(state.playback_buffer) then -- Delete line
+							vim.api.nvim_buf_set_lines(state.playback_buffer, line_num - 1, line_num, false, {})
+						end
+					else -- Update existing line
+						vim.api.nvim_buf_set_lines(state.playback_buffer, line_num - 1, line_num, false, { content })
+					end
+				end
+			end
+
+			cursor_pos = delta.cursor
+		end
+
+		if cursor_pos then -- Set cursor position
+			local cursor_line = math.min(cursor_pos[1], vim.api.nvim_buf_line_count(state.playback_buffer))
+			local lines = vim.api.nvim_buf_get_lines(state.playback_buffer, cursor_line - 1, cursor_line, false)
+			local line = lines[1] or ""
+			local cursor_col = math.min(cursor_pos[2], #line)
+			pcall(vim.api.nvim_win_set_cursor, state.playback_window, { cursor_line, cursor_col })
+		end
+
+		frame_index = frame_index + 1
 		vim.defer_fn(animate, config.playback_delay)
 	end
 
@@ -155,6 +258,8 @@ function M.clear_recording()
 		M.stop_recording()
 	end
 	state.frames = {}
+	state.captions = {}
+	M.clear_caption_marks()
 	vim.notify("Recording cleared", vim.log.levels.INFO)
 end
 

@@ -3,7 +3,7 @@ local M = {}
 local saved_maps = {}
 
 local function save_users_keymaps()
-	local keys_to_override = { " ar", " ae", " aa", " as", " an", " ap", " ak", "ao" }
+	local keys_to_override = { " ar", " ae", " ax", " aa", " as", " an", " ap", " ak", "ao" }
 	local existing_keymaps = vim.api.nvim_get_keymap("n") -- keymaps for normal mode
 	for _, map in ipairs(existing_keymaps) do
 		for _, key in ipairs(keys_to_override) do
@@ -18,6 +18,7 @@ function M.set_keymaps()
 	save_users_keymaps()
 	vim.keymap.set("n", "<leader>ar", ":AnimeRecord<CR>", { desc = "Start Anime record" })
 	vim.keymap.set("n", "<leader>ae", ":AnimeRecordStop<CR>", { desc = "Stop Anime record" })
+	vim.keymap.set("n", "<leader>ax", ":AnimePlayClear<CR>", { desc = "Stop Anime play" })
 	vim.keymap.set("n", "<leader>aa", ":AnimePlay<CR>", { desc = "Start Anime play" })
 	vim.keymap.set("n", "<leader>as", ":AnimePlayStop<CR>", { desc = "Stop Anime play" })
 	vim.keymap.set("n", "<leader>am", ":AnimeNoteAdd<CR>", { desc = "Add note" })
