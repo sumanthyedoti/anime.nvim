@@ -1,8 +1,7 @@
 local M = {}
-local vim_utils = require("anime.vim_utils")
 
 function M.show_note(text)
-	-- Split annotation text into lines for better display
+	-- Split note text into lines for better display
 	local lines = vim.split(text, "\n", { plain = true })
 
 	local buf = vim.api.nvim_create_buf(false, true)
@@ -17,7 +16,7 @@ function M.show_note(text)
 
 	local opts = {
 		relative = "cursor", -- "cursor" | "editor"
-		row = 0,
+		row = 1,
 		col = 4,
 		width = width,
 		height = height,
@@ -53,6 +52,8 @@ function M.show_note(text)
 
 	vim.keymap.set("n", "q", M.close_popup_win__closure(win))
 	vim.keymap.set("n", "<Esc>", M.close_popup_win__closure(win))
+
+	return win
 end
 
 M.render_notes_gutter = function(lines)
@@ -78,7 +79,7 @@ end
 
 function M.close_popup_win__closure(win)
 	return function()
-		if vim.api.nvim_win_is_valid(win) then
+		if win and vim.api.nvim_win_is_valid(win) then
 			vim.api.nvim_win_close(win, true)
 		end
 	end

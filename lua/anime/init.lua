@@ -2,6 +2,7 @@ local M = {}
 local utils = require("anime.utils")
 local vim_utils = require("anime.vim_utils")
 local notes = require("anime.notes")
+local keymapping = require("anime.keymapping")
 
 local config = {
 	playback_delay = 75, -- milliseconds between frames
@@ -19,6 +20,7 @@ local state = {
 	notes = {},
 	notes_line_numbers = {},
 	notes_current_index = nil,
+	notes_current_window = nil,
 }
 
 function M.setup(opts)
@@ -155,13 +157,18 @@ function M.clear_recording()
 	vim.notify("Recording cleared", vim.log.levels.INFO)
 end
 
-local function save_annotation(line, text)
+local function save_note(line, text)
 	state.notes[line] = text
-	local annotated_lines = vim.tbl_keys(state.notes)
-	notes.render_notes_gutter(annotated_lines)
+	local noted_lines = vim.tbl_keys(state.notes)
+	notes.render_notes_gutter(noted_lines)
 end
 
-function M.add_annotation()
+local function update_note_lines()
+	state.note_lines = vim.tbl_keys(state.notes)
+	table.sort(state.note_lines)
+end
+
+function M.add_note()
 	local line = vim.fn.line(".")
 	local buf = vim.api.nvim_create_buf(false, true)
 	local width = math.floor(vim.o.columns * 0.4)
@@ -174,7 +181,7 @@ function M.add_annotation()
 		row = 1,
 		col = 4,
 		border = "rounded",
-		title = "Annotation",
+		title = " 🗈Add Note ",
 	})
 
 	vim.bo[buf].filetype = "markdown"
@@ -185,22 +192,19 @@ function M.add_annotation()
 	vim.keymap.set("n", "<CR>", function()
 		local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 		vim.api.nvim_win_close(win, true)
-		save_annotation(line, table.concat(lines, "\n"))
+		save_note(line, table.concat(lines, "\n"))
 
-		local keys = vim.tbl_keys(state.notes)
-		table.sort(keys)
-		print("state.notes", vim.inspect(state.notes), table.concat(keys))
-		state.note_lines = keys
+		update_note_lines()
 	end, { buffer = buf })
 end
 
 function M.list_notes()
 	if vim.tbl_isempty(state.notes) then
-		vim.notify("No annotations found", vim.log.levels.INFO)
+		vim.notify("No notes found", vim.log.levels.INFO)
 		return
 	end
 
-	local lines = { "Annotations:" }
+	local lines = { "Notes:" }
 	for line_num, text in pairs(state.notes) do
 		table.insert(lines, string.format("  Line %d: %s", line_num, text:sub(1, 50)))
 	end
@@ -208,47 +212,58 @@ function M.list_notes()
 	vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
-function M.show_annotation()
+function M.show_note()
 	local current_line_num = vim.api.nvim_win_get_cursor(0)[1]
 	local current_line_note = state.notes[current_line_num]
 
 	if not current_line_note then
-		vim.notify("No annotation on this line", vim.log.levels.WARN)
+		vim.notify("No note on this line", vim.log.levels.WARN)
 		return
 	end
 
 	notes.show_note(current_line_note)
 end
 
-function M.remove_annotation()
+function M.remove_note()
 	local line = vim.api.nvim_win_get_cursor(0)[1]
 
 	if state.notes[line] then
 		state.notes[line] = nil
 		notes.render_notes_gutter(vim.tbl_keys(state.notes))
-
-		local keys = vim.tbl_keys(state.notes)
-		table.sort(keys)
-		state.note_lines = keys
+		update_note_lines()
 	else
-		vim.notify("No annotation on this line", vim.log.levels.WARN)
+		vim.notify("No note on this line", vim.log.levels.WARN)
 	end
 end
 
 function M.go_to_next_note()
-	local current_line = vim_utils.get_current_line_number()
-	local next_note_line = utils.bigger_value(state.note_lines, current_line)
-	local next_line_note = state.notes[next_note_line]
-	vim.api.nvim_win_set_cursor(0, { next_note_line, 0 })
-	notes.show_note(next_line_note)
+	if vim.tbl_isempty(state.notes) then
+		return
+	end
+
+	notes.close_popup_win__closure(state.notes_current_window)()
+	state.notes_current_window = nil
+
+	local current_line_num = vim_utils.get_current_line_number()
+	local next_note_line_num = utils.bigger_value(state.note_lines, current_line_num)
+	local next_note = state.notes[next_note_line_num]
+	vim.api.nvim_win_set_cursor(0, { next_note_line_num, 0 })
+	state.notes_current_window = notes.show_note(next_note)
 end
 
 function M.go_to_prev_note()
-	local current_line = vim_utils.get_current_line_number()
-	local prev_note_line = utils.smaller_value(state.note_lines, current_line)
-	local prev_note = state.notes[prev_note_line]
-	vim.api.nvim_win_set_cursor(0, { prev_note_line, 0 })
-	notes.show_note(prev_note)
+	if vim.tbl_isempty(state.notes) then
+		return
+	end
+
+	notes.close_popup_win__closure(state.notes_current_window)()
+	state.notes_current_window = nil
+
+	local current_line_num = vim_utils.get_current_line_number()
+	local prev_note_line_num = utils.smaller_value(state.note_lines, current_line_num)
+	local prev_note = state.notes[prev_note_line_num]
+	vim.api.nvim_win_set_cursor(0, { prev_note_line_num, 0 })
+	state.notes_current_window = notes.show_note(prev_note)
 end
 
 vim.api.nvim_create_user_command("AnimeRecordStart", M.start_recording, {
@@ -271,15 +286,15 @@ vim.api.nvim_create_user_command("AnimePlayStop", M.stop, {
 	desc = "Stop playback",
 })
 
-vim.api.nvim_create_user_command("AnimeNoteAdd", M.add_annotation, {
+vim.api.nvim_create_user_command("AnimeNoteAdd", M.add_note, {
 	desc = "Add Node",
 })
 
-vim.api.nvim_create_user_command("AnimeNoteShow", M.show_annotation, {
+vim.api.nvim_create_user_command("AnimeNoteShow", M.show_note, {
 	desc = "Show Note",
 })
 
-vim.api.nvim_create_user_command("AnimeNoteRemove", M.remove_annotation, {
+vim.api.nvim_create_user_command("AnimeNoteRemove", M.remove_note, {
 	desc = "Remove Note",
 })
 
@@ -293,6 +308,14 @@ vim.api.nvim_create_user_command("AnimeNoteNext", M.go_to_next_note, {
 
 vim.api.nvim_create_user_command("AnimeNotePrev", M.go_to_prev_note, {
 	desc = "Show next note",
+})
+
+vim.api.nvim_create_user_command("AnimeKeymapsSet", keymapping.set_keymaps, {
+	desc = "Set Anime keymaps",
+})
+
+vim.api.nvim_create_user_command("AnimeKeymapsRestore", keymapping.restore_keymaps, {
+	desc = "Resore Anime keymaps",
 })
 
 return M
