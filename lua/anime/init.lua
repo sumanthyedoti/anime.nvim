@@ -15,7 +15,7 @@ local state = {
 	recording_buffer = nil,
 	playback_buffer = nil,
 	playback_window = nil,
-	captions = {},
+	notes = {},
 	popup_win = nil,
 	popup_buf = nil,
 	last_lines = nil,
@@ -25,16 +25,15 @@ local state = {
 local function calculate_delta(old_lines, new_lines, cursor)
 	local old_count = #old_lines
 	local new_count = #new_lines
-	local line_diff = new_count - old_count
 
 	local delta = {
 		line_changes = {},
 		line_count = new_count,
-		line_diff = line_diff,
 		cursor = { cursor[1], cursor[2] },
 	}
 
 	-- Flag if lines were added or removed
+	local line_diff = new_count - old_count
 	if line_diff ~= 0 then
 		delta.line_count_changed = true
 	end
@@ -66,27 +65,26 @@ local function capture_frame()
 		return
 	end
 
-	-- First frame: store everything
-	if #state.frames == 0 then
+	if #state.frames == 0 then -- First frame: store everything
+		local initial_changes = {}
+		for i, line in ipairs(lines) do
+			initial_changes[i] = line
+		end
+
 		table.insert(state.frames, {
-			type = "full",
-			lines = vim.deepcopy(lines),
+			line_changes = initial_changes,
+			line_count = #lines,
 			cursor = { cursor[1], cursor[2] },
 		})
 		state.last_lines = vim.deepcopy(lines)
 		return
 	end
 
-	-- Calculate and store delta
 	local delta = calculate_delta(state.last_lines, lines, cursor)
 
 	-- Only store if there are actual changes
 	if next(delta.line_changes) ~= nil then
-		table.insert(state.frames, {
-			type = "delta",
-			delta = delta,
-		})
-
+		table.insert(state.frames, delta)
 		state.last_lines = vim.deepcopy(lines)
 	end
 end
@@ -151,20 +149,19 @@ local function after_play()
 	if cmp then -- Re-enable auto-completion suggestions
 		cmp.setup.buffer({ enabled = true })
 	end
-	notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
+	if next(state.notes) ~= nil then
+		notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
+	end
 	vim.notify("Playback complete!", vim.log.levels.INFO)
 end
 
 local function apply_delta(current_lines, delta)
 	local new_lines = vim.deepcopy(current_lines)
 
-	-- Apply line changes
-	for line_num, content in pairs(delta.line_changes) do
-		if content == false then
-			-- Line was deleted
+	for line_num, content in pairs(delta.line_changes) do -- Apply line changes
+		if content == false then -- Line was deleted
 			new_lines[line_num] = nil
-		else
-			-- Line was changed or added
+		else -- Line was changed or added
 			new_lines[line_num] = content
 		end
 	end
@@ -200,37 +197,30 @@ function M.play()
 
 		local frame = state.frames[frame_index]
 		local cursor_pos = nil
+		local delta = frame
+		current_buffer_state = apply_delta(current_buffer_state, delta)
 
-		if frame.type == "full" then -- Full frame: set entire buffer
-			current_buffer_state = vim.deepcopy(frame.lines)
-			vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, current_buffer_state)
-			cursor_pos = frame.cursor
-		elseif frame.type == "delta" then
-			local delta = frame.delta -- Delta frame: apply changes
+		-- Check if it's a multi line change
+		local current_line_count = vim.api.nvim_buf_line_count(state.playback_buffer)
+		local target_line_count = delta.line_count
 
-			current_buffer_state = apply_delta(current_buffer_state, delta)
-
-			-- Check if it's a multi line change
-			local current_line_count = vim.api.nvim_buf_line_count(state.playback_buffer)
-			local target_line_count = delta.line_count
-
+		if math.abs(current_line_count - target_line_count) > 1 or delta.line_count_changed then
 			-- Multi line change -- replace entire buffer
-			if math.abs(current_line_count - target_line_count) > 1 or delta.line_count_changed then
-				vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, current_buffer_state)
-			else -- Minor changes - update only changed lines
-				for line_num, content in pairs(delta.line_changes) do
-					if content == false then
-						if line_num <= vim.api.nvim_buf_line_count(state.playback_buffer) then -- Delete line
-							vim.api.nvim_buf_set_lines(state.playback_buffer, line_num - 1, line_num, false, {})
-						end
-					else -- Update existing line
-						vim.api.nvim_buf_set_lines(state.playback_buffer, line_num - 1, line_num, false, { content })
+			vim.api.nvim_buf_set_lines(state.playback_buffer, 0, -1, false, current_buffer_state)
+		else
+			-- Single line change - update only changed lines
+			for line_num, content in pairs(delta.line_changes) do
+				if content == false then
+					if line_num <= vim.api.nvim_buf_line_count(state.playback_buffer) then -- Delete line
+						vim.api.nvim_buf_set_lines(state.playback_buffer, line_num - 1, line_num, false, {})
 					end
+				else -- Update existing line
+					vim.api.nvim_buf_set_lines(state.playback_buffer, line_num - 1, line_num, false, { content })
 				end
 			end
-
-			cursor_pos = delta.cursor
 		end
+
+		cursor_pos = delta.cursor
 
 		if cursor_pos then -- Set cursor position
 			local cursor_line = math.min(cursor_pos[1], vim.api.nvim_buf_line_count(state.playback_buffer))
@@ -258,15 +248,16 @@ function M.clear_recording()
 		M.stop_recording()
 	end
 	state.frames = {}
-	state.captions = {}
+	state.notes = {}
 	M.clear_caption_marks()
 	vim.notify("Recording cleared", vim.log.levels.INFO)
 end
 
 local function save_note(line, text)
 	state.notes[line] = text
-	local noted_lines = vim.tbl_keys(state.notes)
-	notes.render_notes_gutter_signs(noted_lines)
+	if next(state.notes) ~= nil then
+		notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
+	end
 end
 
 local function update_note_lines()
@@ -335,7 +326,7 @@ function M.remove_note()
 
 	if state.notes[line] then
 		state.notes[line] = nil
-		notes.render_notes_gutter_signs(vim.tbl_keys(state.notes))
+		notes.clear_notes_gutter_signs()
 		update_note_lines()
 	else
 		vim.notify("No note on this line", vim.log.levels.WARN)
